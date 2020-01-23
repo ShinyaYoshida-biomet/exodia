@@ -1,13 +1,15 @@
-import numpy as np
+# /bin/python
 import random
+import multiset as ms
+import numpy as np
 import copy
 import traceback
 import pandas as pd
 from collections import defaultdict
-
+from tqdm import tqdm
 
 alpha = 0.2
-gamma = 0.9
+gamma = 0.1
 states_key = ["hands", "fields", "cemetary", "normal_summon"]
 
 class Duel :
@@ -19,7 +21,7 @@ class Duel :
                     "封印されし者の左腕" : 1,
                     "封印されし者の右腕" : 1,
                     "封印されし者の右足" : 1,
-                    "封印されしエクゾディア" : 1,
+                    "封印されしエグゾディア" : 1,
                     "一時休戦" : 1,
                     "成金ゴブリン" : 3,
                     "テラ・フォーミング" : 1,
@@ -70,7 +72,7 @@ class exodia(Monster) :
         self.tribe = "magician"
         self.level = 3
         self.attribute = "darkness"
-        self.name = "封印されしエクゾディア"
+        self.name = "封印されしエグゾディア"
         self.atk = 1000
         self.dfc = 1000
 
@@ -172,18 +174,19 @@ cards = {
     "封印されし者の左腕" : exodia_left_hand,
     "封印されし者の右腕" : exodia_right_hand,
     "封印されし者の右足" : exodia_right_leg,
-    "封印されしエクゾディア" : exodia,
+    "封印されしエグゾディア" : exodia,
     "一時休戦" : rest_for_a_while,
     "成金ゴブリン" : upstart_goblin,
     "テラ・フォーミング" : teraforming,
     "チキン・レース" : chicken_race}
 
 
+
 def complete_exodia() :
     global hands
-    win_hands = np.array(["封印されし者の左足", "封印されし者の左腕",
-        "封印されし者の右足", "封印されし者の右腕", "封印されしエグゾディア"])
-    tf = (len(hands) >= 5) and (set(win_hands) in set(hands))
+    win_hands = ["封印されし者の左足", "封印されし者の左腕",
+        "封印されし者の右足", "封印されし者の右腕", "封印されしエグゾディア"]
+    tf = (len(hands) >= 5) and (set(win_hands) <= set(hands))
     return(tf)
 
 
@@ -191,9 +194,7 @@ def get_rewards() :
     global decks, win_hands
     reward = 13 - len(decks) + len(hands) + normal_summon
     if complete_exodia() :
-        print(f"This is the hands {hands}")
-        reward += 100
-        print("Win")
+        reward += 1000
     return(reward)
 
 def get_states() :
@@ -208,153 +209,132 @@ def get_states() :
 
 
 
-def reverse_states(original_states) :
-    global hands, fields, decks, normal_summon, cemetary, states_key
-
-    hands = original_states["hands"]
-    fields = original_states["fields"]
-    decks = original_states["decks"]
-    normal_summon = original_states["normal_summon"]
-    cemetary = original_states["cemetary"]
-    states = get_states()
-    return(states)
-
-
 def get_actions() :
-    global hands, cards
+    global hands, cards, normal_summon
     action_dict = defaultdict()
-    for k in hands :
+
+    for k in hands : #k=hands[0]
+        action = None
         card = cards[k]()
         if card.category == "magic" :
             action = cards[k]().activate
         elif card.category == "monster" :
-            action = cards[k]().summon
-        else  :
-            action = none
-        action_dict[card.name] = action
+            if normal_summon >= 1 :
+                action = cards[k]().summon
+
+        if action : action_dict[card.name] = action
+        else  : continue
     return(action_dict)
 
 
-def get_index(original_states) :
-    ind = ""
-    global states_key
-    #for i in range(len(states)) :\
-    for k in states_key :
-        original_states["normal_summon"] = str(original_states["normal_summon"])
-        ind += f"{k}_" + "_".join(original_states[k])
-    return(ind)
+
+def existed_state(states, Q_table) :
+    hands = ms.Multiset(states["hands"])
+    fields = ms.Multiset(states["fields"])
+    cemetary = ms.Multiset(states["cemetary"])
+    cond = f"hands=='{hands}'"
+    cond += f" & fields=='{fields}'"
+    cond += f" & cemetary=='{cemetary}'"
+
+    tf = (Q_table.hands == hands) * (Q_table.fields == fields) * (Q_table.cemetary == cemetary)
+    if tf.sum() == 0 :
+        return(False)
+    else :
+        ind = Q_table.index[tf.values][0]
+        return(ind)
 
 
-def get_Qval(states, action) :
-    global Q_table
-    ind = get_index(states)
-    if ind in list(Q_table.index) :
-        q = Q_table.loc[ind, action]
-    else  :
-        s = pd.Series([0]*Q_table.shape[1], index=Q_table.columns, name=ind)
-        Q_table = Q_table.append(s)
-        q = 0
-    return(q)
+
+def add_states_toQ(states, Q_table) :
+    array = [ms.Multiset(states["hands"]), ms.Multiset(states["fields"]),
+        ms.Multiset(states["cemetary"])]
+    array += [0]*(Q_table.shape[1]-3)
+    s = pd.Series(array, index=Q_table.columns)
+    Q_table = Q_table.append(s, ignore_index=True)
+    return(Q_table)
 
 
-def get_Qmax(action_dict) :
-    global Q_table
-    qs = []
-    for l in action_dict :
-        print(l)
-        save_original_states()
-        action_dict[l]() # action
-        new_states = get_states()
-        q = get_Qval(new_states, l)
-        reverse_states()
-        qs.append(q)
-    best_action = list(action_dict.keys())[np.argmax(qs)]
-    return(best_action, max(qs))
-
-
-def decide_action(states) :
-    global Q_table
-    ind = get_index(states)
+def decide_action(states, Q_table) :
+    ind = existed_state(states, Q_table)
     actions = get_actions()
-    if ind  in list(Q_table.index) :
-        s = Q_table.loc[ind, :]
+    if type(ind) == int and not Q_table.empty :
+        s = Q_table.iloc[ind, :]
+        cands = np.argmax(s[actions])
+        max_ = cands.max()
     else  :
-        s = pd.Series([0]*Q_table.shape[1], index=Q_table.columns, name=ind)
-        Q_table = Q_table.append(s)
-    # best_action = s[actions].argmax()
-    cands = np.argmax(s[actions])
+        Q_table = add_states_toQ(states, Q_table)
+        n_actions = len(actions)
+        if n_actions >=1 :
+            cands = list(actions)[np.random.randint(n_actions)]
+        else :
+            raise Exception("ImplementError")
+        max_ = 0
+
+
     if type(cands) == str :
         best_action = cands
     else :
         i = np.random.randint(0, len(cands))
         best_action = cands.index[i]
+    return(best_action, max_, Q_table)
 
-    return(best_action, s.max())
+#decide_action(states, Q_table)[2]
 
 
-
-def renew_Q(best_action, prev_val) :
-    global Q_table, alpha, gamma, decks
+def renew_Q(best_action, prev_val, Q_table, original_states, new_states) :
+    global alpha, gamma, decks
     reward = get_rewards()
-    original_states = copy.deepcopy(get_states())
-    action_dict = get_actions()
-
-    action_dict[best_action]()
-
-    new_states = get_states()
-    #states = reverse_states(original_states)
-    best_action_next, Qmax = decide_action(new_states)
+    best_action_next, Qmax, Q_table = decide_action(new_states, Q_table)
     new_val = (1 - alpha) * prev_val + alpha * (reward + gamma * Qmax)
 
-    ind = get_index(original_states)
-    if ind in list(Q_table.index) :
+    ind = existed_state(original_states, Q_table)
+    if type(ind)==int  :
         Q_table.loc[ind, best_action] = new_val
     else :
-        s = pd.Series([0]*Q_table.shape[1], index=Q_table.columns, name=ind)
-        s[best_action] = new_val
-        Q_table = Q_table.append(s)
+        Q_table = add_states_toQ(original_states, Q_table)
+        Q_table.loc[Q_table.index[-1], best_action] = new_val
+
+    return(Q_table)
 
 
 
-
-
-
+#normal_summon
 Q_tables = []
-Q_table = pd.DataFrame(columns = cards.keys())
+colQ = ["hands", "fields", "cemetary"] + list(cards.keys())
+Q_table = pd.DataFrame(columns =colQ)
 n_success = 0
-for i in range(10000) :
+for i in tqdm(range(2000)) :
     try :
         duel = Duel()
         duel.start()
+        if complete_exodia() :
+             n_success += 1
+             pass
         tf = True
         j = 0
         while tf :
             states = get_states()
+            original_states = copy.deepcopy(states)
             actions = get_actions()
-            best_action, prev_val = decide_action(states)
-            renew_Q(best_action, prev_val)
+            best_action, prev_val, Q_table = decide_action(states, Q_table)
             actions[best_action]()
+            if complete_exodia() :  n_success += 1
+            new_states = get_states()
+            Q_table = renew_Q(best_action, prev_val,
+                Q_table, original_states, new_states)
             tf = not(complete_exodia() or len(decks) == 0 or j >= 30)
             j += 1
         Q_tables.append(Q_table)
-        n_success += 1
 
     except :
         pass
 
-Q_table.index.nunique()
-Q_tables[0]
+print(n_success)
+
 Q_table.sum()
-actions = get_actions()
-states = get_states()
-actions, states
-best_action, prev_val = decide_action(states)
-states
-renew_Q(best_action, prev_val)
-Q_table
-get_states()
+Q_table.hands == ms.Multiset(["チキン・レース", "テラ・フォーミング", "チキン・レース", "成金ゴブリン"])
 
-
+sum(Q_table.hands == ms.Multiset(["チキン・レース", "テラ・フォーミング", "チキン・レース", "成金ゴブリン"]))
 
 
 #### Duel simulation
