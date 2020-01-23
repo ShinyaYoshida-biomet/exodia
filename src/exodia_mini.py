@@ -8,8 +8,8 @@ import pandas as pd
 from collections import defaultdict
 from tqdm import tqdm
 
-alpha = 0.2
-gamma = 0.1
+alpha = 0.9
+gamma = 0.9
 states_key = ["hands", "fields", "cemetary", "normal_summon"]
 
 class Duel :
@@ -194,6 +194,7 @@ def get_rewards() :
     global decks, win_hands
     reward = 13 - len(decks) + len(hands) + normal_summon
     if complete_exodia() :
+        print("big rewards")
         reward += 1000
     return(reward)
 
@@ -257,7 +258,7 @@ def add_states_toQ(states, Q_table) :
 def decide_action(states, Q_table) :
     ind = existed_state(states, Q_table)
     actions = get_actions()
-    if type(ind) == int and not Q_table.empty :
+    if type(ind) == np.int64 and not Q_table.empty :
         s = Q_table.iloc[ind, :]
         cands = np.argmax(s[actions])
         max_ = cands.max()
@@ -288,7 +289,7 @@ def renew_Q(best_action, prev_val, Q_table, original_states, new_states) :
     new_val = (1 - alpha) * prev_val + alpha * (reward + gamma * Qmax)
 
     ind = existed_state(original_states, Q_table)
-    if type(ind)==int  :
+    if type(ind)==np.int64  :
         Q_table.loc[ind, best_action] = new_val
     else :
         Q_table = add_states_toQ(original_states, Q_table)
@@ -332,9 +333,19 @@ for i in tqdm(range(2000)) :
 print(n_success)
 
 Q_table.sum()
-Q_table.hands == ms.Multiset(["チキン・レース", "テラ・フォーミング", "チキン・レース", "成金ゴブリン"])
+Q_table.shape
 
-sum(Q_table.hands == ms.Multiset(["チキン・レース", "テラ・フォーミング", "チキン・レース", "成金ゴブリン"]))
+sum(Q_table.hands == ms.Multiset(["チキン・レース",
+    "テラ・フォーミング", "チキン・レース", "成金ゴブリン", "封印されしエグゾディア"]))
+
+
+Q_table.loc[Q_table.hands == ms.Multiset(["チキン・レース", "テラ・フォーミング", "チキン・レース", "成金ゴブリン", "封印されしエグゾディア"]), :]
+Q_table.drop(columns=["hands", "fields", "cemetary"]).sum(axis=1).sort_values()
+Q_table.iloc[2491,]["hands"]
+Q_table.iloc[690,]["hands"]
+Q_table.iloc[1422,]["hands"]
+Q_table.iloc[4153,]
+
 
 
 #### Duel simulation
