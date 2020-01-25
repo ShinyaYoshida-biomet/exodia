@@ -193,10 +193,13 @@ def complete_exodia() :
 def get_rewards() :
     global decks, win_hands
     reward = 13 - len(decks) + len(hands) + normal_summon
+    reward += sum(["封印されし" in k for k in hands])
+    reward -= sum(["テラ・フォーミング" in k for k in hands])
     if complete_exodia() :
         print("big rewards")
         reward += 1000
     return(reward)
+
 
 def get_states() :
     global hands, fields, cemetary, decks, normal_summon
@@ -345,7 +348,9 @@ Q_table.iloc[2491,]["hands"]
 Q_table.iloc[690,]["hands"]
 Q_table.iloc[1422,]["hands"]
 Q_table.iloc[4153,]
-
+Q_table.iloc[56, ]
+Q_table.query("テラ・フォーミング >= 10")
+Q_table[Q_table["テラ・フォーミング"]>=10]
 
 
 #### Duel simulation
